@@ -1,5 +1,4 @@
 name: Build and release Aseprite
-
 on:
   push:
     branches:
@@ -15,7 +14,6 @@ on:
         default: true
 env:
   BUILD_TYPE: Release
-
 jobs:
   fetch-aseprite-info:
     name: Fetch deps info
@@ -31,7 +29,6 @@ jobs:
             group: aseprite
             repo: aseprite
             match: Aseprite-.*?-Source.zip
-
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -47,7 +44,6 @@ jobs:
           body: Aseprite-${{ needs.fetch-aseprite-info.outputs.release-tag }}
           skipIfReleaseExists: true
           token: ${{ secrets.GITHUB_TOKEN }}
-
   build-aseprite:
     name: Build Aseprite
     needs: [fetch-aseprite-info, create-release]
@@ -82,17 +78,20 @@ jobs:
         working-directory: aseprite
         shell: bash
         run: |
+          set -e
+          mkdir -p skia
           if [[ "${{ runner.os }}" == "Windows" ]] ; then
-            choco install wget -y --no-progress
-            wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip
-            unzip Skia-Windows-Release-x64.zip -d skia
+            curl -fL --retry 5 --retry-delay 5 -o skia.zip \
+              https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip
           elif [[ "${{ runner.os }}" == "macOS" ]] ; then
-            wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-macOS-Release-arm64.zip
-            unzip Skia-macOS-Release-arm64.zip -d skia
+            curl -fL --retry 5 --retry-delay 5 -o skia.zip \
+              https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-macOS-Release-arm64.zip
           else
-            wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip
-            unzip Skia-Linux-Release-x64.zip -d skia
+            curl -fL --retry 5 --retry-delay 5 -o skia.zip \
+              https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip
           fi
+          unzip -o skia.zip -d skia
+          rm -f skia.zip
       - uses: aseprite/get-ninja@main
       - uses: ilammy/msvc-dev-cmd@v1.13.0
         if: runner.os == 'Windows'
@@ -103,15 +102,13 @@ jobs:
           export enable_ccache=off
           export laf_backend=skia
           export enable_scripting=on
-
           if [[ "${{ runner.os }}" == "macOS" ]] ; then
             export skia_arch=arm64
           else
             export skia_arch=x64
           fi
-
           cmake -S . -B build -G Ninja \
-            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
             -DENABLE_TESTS=OFF \
             -DENABLE_I18N_STRINGS=ON \
@@ -139,7 +136,6 @@ jobs:
             data_dir=Aseprite.app/Contents/Resources/data
           fi
           strings_dir="$data_dir/strings.git"
-
           translation_found=false
           for translation in "$strings_dir"/*.ini; do
             if [[ "${translation##*/}" != en.ini && -f "$translation" ]] &&
@@ -152,7 +148,6 @@ jobs:
             echo "No non-English translation content found in $strings_dir" >&2
             exit 1
           fi
-
           # Keep translations and licensing files; omit only Git metadata.
           rm -rf "$strings_dir/.git"
       - name: Make portable zip
