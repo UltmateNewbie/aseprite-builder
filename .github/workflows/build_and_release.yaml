@@ -1,4 +1,5 @@
 name: Build and release Aseprite
+
 on:
   push:
     branches:
@@ -14,6 +15,7 @@ on:
         default: true
 env:
   BUILD_TYPE: Release
+
 jobs:
   fetch-aseprite-info:
     name: Fetch deps info
@@ -24,11 +26,22 @@ jobs:
     steps:
       - name: Fetch Aseprite release link
         id: aseprite-link
-        uses: a1393323447/fetch-release@main
-        with:
-            group: aseprite
-            repo: aseprite
-            match: Aseprite-.*?-Source.zip
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          api="repos/aseprite/aseprite/releases/latest"
+          tag="$(gh api "$api" --jq '.tag_name')"
+          url="$(gh api "$api" --jq '.assets[] | select(.name | startswith("Aseprite-") and endswith("-Source.zip")) | .browser_download_url' | head -n1)"
+          if [[ -z "$url" ]]; then
+            echo "No Aseprite-*-Source.zip asset found in release $tag" >&2
+            exit 1
+          fi
+          echo "release-tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "download-link=$url" >> "$GITHUB_OUTPUT"
+          echo "Found $tag -> $url"
+
   create-release:
     name: Create Release
     runs-on: ubuntu-latest
@@ -44,6 +57,7 @@ jobs:
           body: Aseprite-${{ needs.fetch-aseprite-info.outputs.release-tag }}
           skipIfReleaseExists: true
           token: ${{ secrets.GITHUB_TOKEN }}
+
   build-aseprite:
     name: Build Aseprite
     needs: [fetch-aseprite-info, create-release]
@@ -102,11 +116,13 @@ jobs:
           export enable_ccache=off
           export laf_backend=skia
           export enable_scripting=on
+
           if [[ "${{ runner.os }}" == "macOS" ]] ; then
             export skia_arch=arm64
           else
             export skia_arch=x64
           fi
+
           cmake -S . -B build -G Ninja \
             -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
@@ -136,6 +152,7 @@ jobs:
             data_dir=Aseprite.app/Contents/Resources/data
           fi
           strings_dir="$data_dir/strings.git"
+
           translation_found=false
           for translation in "$strings_dir"/*.ini; do
             if [[ "${translation##*/}" != en.ini && -f "$translation" ]] &&
@@ -148,6 +165,7 @@ jobs:
             echo "No non-English translation content found in $strings_dir" >&2
             exit 1
           fi
+
           # Keep translations and licensing files; omit only Git metadata.
           rm -rf "$strings_dir/.git"
       - name: Make portable zip
